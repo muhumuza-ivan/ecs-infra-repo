@@ -1,0 +1,43 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: EventBridge rule that starts the pipeline on a new ECR image push
+
+Parameters:
+  EcrRepositoryName:
+    Type: String
+  PipelineName:
+    Type: String
+
+Resources:
+  EventBridgeInvokePipelineRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { Service: events.amazonaws.com }
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: start-pipeline
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: codepipeline:StartPipelineExecution
+                Resource: !Sub arn:aws:codepipeline:${AWS::Region}:${AWS::AccountId}:${PipelineName}
+
+  EcrPushRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Description: Trigger pipeline on new image push to ECR
+      EventPattern:
+        source: ["aws.ecr"]
+        detail-type: ["ECR Image Action"]
+        detail:
+          action-type: ["PUSH"]
+          repository-name: [!Ref EcrRepositoryName]
+          result: ["SUCCESS"]
+      Targets:
+        - Arn: !Sub arn:aws:codepipeline:${AWS::Region}:${AWS::AccountId}:${PipelineName}
+          Id: CodePipelineTarget
+          RoleArn: !GetAtt EventBridgeInvokePipelineRole.Arn

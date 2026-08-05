@@ -1,0 +1,191 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: CodeDeploy (ECS blue/green) application, deployment group, and CodePipeline
+
+Parameters:
+  ClusterName:
+    Type: String
+  ServiceName:
+    Type: String
+  ListenerArn:
+    Type: String
+  TargetGroupBlueName:
+    Type: String
+  TargetGroupGreenName:
+    Type: String
+  ArtifactBucketName:
+    Type: String
+  EcrRepositoryName:
+    Type: String
+  GitHubConnectionArn:
+    Type: String
+    Description: ARN of the CodeConnections connection authorized to your GitHub account (same one used for GitSync)
+  AppRepoFullId:
+    Type: String
+    Description: "e.g. muhumuza-ivan/ecs-app-repo"
+  AppRepoBranch:
+    Type: String
+    Default: main
+
+Resources:
+  CodeDeployServiceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { Service: codedeploy.amazonaws.com }
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AWSCodeDeployRoleForECS
+
+  CodeDeployApplication:
+    Type: AWS::CodeDeploy::Application
+    Properties:
+      ComputePlatform: ECS
+
+  CodeDeployDeploymentGroup:
+    Type: AWS::CodeDeploy::DeploymentGroup
+    Properties:
+      ApplicationName: !Ref CodeDeployApplication
+      DeploymentGroupName: lab-app-dg
+      ServiceRoleArn: !GetAtt CodeDeployServiceRole.Arn
+      DeploymentConfigName: CodeDeployDefault.ECSAllAtOnce
+      DeploymentStyle:
+        DeploymentType: BLUE_GREEN
+        DeploymentOption: WITH_TRAFFIC_CONTROL
+      BlueGreenDeploymentConfiguration:
+        TerminateBlueInstancesOnDeploymentSuccess:
+          Action: TERMINATE
+          TerminationWaitTimeInMinutes: 5
+        DeploymentReadyOption:
+          ActionOnTimeout: CONTINUE_DEPLOYMENT
+      LoadBalancerInfo:
+        TargetGroupPairInfoList:
+          - ProdTrafficRoute:
+              ListenerArns: [!Ref ListenerArn]
+            TargetGroups:
+              - Name: !Ref TargetGroupBlueName
+              - Name: !Ref TargetGroupGreenName
+      ECSServices:
+        - ServiceName: !Ref ServiceName
+          ClusterName: !Ref ClusterName
+
+  PipelineServiceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { Service: codepipeline.amazonaws.com }
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: pipeline-permissions
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:PutObject
+                  - s3:GetBucketVersioning
+                Resource:
+                  - !Sub arn:aws:s3:::${ArtifactBucketName}
+                  - !Sub arn:aws:s3:::${ArtifactBucketName}/*
+              - Effect: Allow
+                Action:
+                  - codedeploy:CreateDeployment
+                  - codedeploy:GetDeployment
+                  - codedeploy:GetDeploymentConfig
+                  - codedeploy:GetApplicationRevision
+                  - codedeploy:RegisterApplicationRevision
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - ecr:DescribeImages
+                  - ecr:GetDownloadUrlForLayer
+                  - ecr:BatchGetImage
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - codeconnections:UseConnection
+                Resource: !Ref GitHubConnectionArn
+              - Effect: Allow
+                Action:
+                  - ecs:RegisterTaskDefinition
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - iam:PassRole
+                Resource: "*"
+                Condition:
+                  StringEqualsIfExists:
+                    iam:PassedToService: ecs-tasks.amazonaws.com
+
+  Pipeline:
+    Type: AWS::CodePipeline::Pipeline
+    Properties:
+      Name: lab-app-pipeline
+      RoleArn: !GetAtt PipelineServiceRole.Arn
+      ArtifactStore:
+        Type: S3
+        Location: !Ref ArtifactBucketName
+      Stages:
+        - Name: Source
+          Actions:
+            # Source #1: app-repo on GitHub - supplies taskdef.json and appspec.yaml
+            - Name: AppSource
+              ActionTypeId:
+                Category: Source
+                Owner: AWS
+                Provider: CodeStarSourceConnection
+                Version: "1"
+              Configuration:
+                ConnectionArn: !Ref GitHubConnectionArn
+                FullRepositoryId: !Ref AppRepoFullId
+                BranchName: !Ref AppRepoBranch
+                OutputArtifactFormat: CODE_ZIP
+              OutputArtifacts:
+                - Name: AppSource
+            # Source #2: ECR - supplies imageDetail.json (the pushed image's URI)
+            - Name: ECRSource
+              ActionTypeId:
+                Category: Source
+                Owner: AWS
+                Provider: ECR
+                Version: "1"
+              Configuration:
+                RepositoryName: !Ref EcrRepositoryName
+                ImageTag: latest
+              OutputArtifacts:
+                - Name: ImageDetail
+        - Name: Deploy
+          Actions:
+            - Name: DeployToECS
+              ActionTypeId:
+                Category: Deploy
+                Owner: AWS
+                Provider: CodeDeployToECS
+                Version: "1"
+              Configuration:
+                ApplicationName: !Ref CodeDeployApplication
+                DeploymentGroupName: !Ref CodeDeployDeploymentGroup
+                TaskDefinitionTemplateArtifact: AppSource
+                TaskDefinitionTemplatePath: taskdef.json
+                AppSpecTemplateArtifact: AppSource
+                AppSpecTemplatePath: appspec.yaml
+                # This is what substitutes <IMAGE1_NAME> in taskdef.json with the real image URI
+                Image1ArtifactName: ImageDetail
+                Image1ContainerName: IMAGE1_NAME
+              InputArtifacts:
+                - Name: AppSource
+                - Name: ImageDetail
+
+Outputs:
+  PipelineName:
+    Value: !Ref Pipeline
+  CodeDeployApplicationName:
+    Value: !Ref CodeDeployApplication
+  CodeDeployDeploymentGroupName:
+    Value: !Ref CodeDeployDeploymentGroup

@@ -1,0 +1,95 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Root stack - wires all nested child stacks together
+
+Parameters:
+  TemplateBucketName:
+    Type: String
+    Description: S3 bucket that holds the uploaded child template files
+  GitHubOrg:
+    Type: String
+  AppRepoName:
+    Type: String
+  GitHubConnectionArn:
+    Type: String
+    Description: ARN of the CodeConnections connection authorized to your GitHub account
+
+Resources:
+  NetworkStack:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: !Sub https://${TemplateBucketName}.s3.${AWS::Region}.amazonaws.com/templates/network.yaml
+
+  SecurityGroupStack:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: !Sub https://${TemplateBucketName}.s3.${AWS::Region}.amazonaws.com/templates/security-groups.yaml
+      Parameters:
+        VpcId: !GetAtt NetworkStack.Outputs.VpcId
+
+  EcrStack:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: !Sub https://${TemplateBucketName}.s3.${AWS::Region}.amazonaws.com/templates/ecr.yaml
+
+  ArtifactBucketStack:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: !Sub https://${TemplateBucketName}.s3.${AWS::Region}.amazonaws.com/templates/artifact-bucket.yaml
+
+  OidcStack:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: !Sub https://${TemplateBucketName}.s3.${AWS::Region}.amazonaws.com/templates/oidc-github.yaml
+      Parameters:
+        GitHubOrg: !Ref GitHubOrg
+        AppRepoName: !Ref AppRepoName
+        EcrRepositoryName: !GetAtt EcrStack.Outputs.RepositoryName
+
+  AlbStack:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: !Sub https://${TemplateBucketName}.s3.${AWS::Region}.amazonaws.com/templates/alb.yaml
+      Parameters:
+        VpcId: !GetAtt NetworkStack.Outputs.VpcId
+        PublicSubnet1Id: !GetAtt NetworkStack.Outputs.PublicSubnet1Id
+        PublicSubnet2Id: !GetAtt NetworkStack.Outputs.PublicSubnet2Id
+        AlbSecurityGroupId: !GetAtt SecurityGroupStack.Outputs.AlbSecurityGroupId
+
+  EcsStack:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: !Sub https://${TemplateBucketName}.s3.${AWS::Region}.amazonaws.com/templates/ecs-cluster-service.yaml
+      Parameters:
+        VpcId: !GetAtt NetworkStack.Outputs.VpcId
+        PrivateSubnet1Id: !GetAtt NetworkStack.Outputs.PrivateSubnet1Id
+        PrivateSubnet2Id: !GetAtt NetworkStack.Outputs.PrivateSubnet2Id
+        EcsTaskSecurityGroupId: !GetAtt SecurityGroupStack.Outputs.EcsTaskSecurityGroupId
+        EcrRepositoryUri: !GetAtt EcrStack.Outputs.RepositoryUri
+        TargetGroupBlueArn: !GetAtt AlbStack.Outputs.TargetGroupBlueArn
+
+  CodePipelineStack:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: !Sub https://${TemplateBucketName}.s3.${AWS::Region}.amazonaws.com/templates/codepipeline-codedeploy.yaml
+      Parameters:
+        ClusterName: !GetAtt EcsStack.Outputs.ClusterName
+        ServiceName: !GetAtt EcsStack.Outputs.ServiceName
+        ListenerArn: !GetAtt AlbStack.Outputs.ListenerArn
+        TargetGroupBlueName: !GetAtt AlbStack.Outputs.TargetGroupBlueName
+        TargetGroupGreenName: !GetAtt AlbStack.Outputs.TargetGroupGreenName
+        ArtifactBucketName: !GetAtt ArtifactBucketStack.Outputs.BucketName
+        EcrRepositoryName: !GetAtt EcrStack.Outputs.RepositoryName
+        GitHubConnectionArn: !Ref GitHubConnectionArn
+        AppRepoFullId: !Sub "${GitHubOrg}/${AppRepoName}"
+
+  EventBridgeStack:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: !Sub https://${TemplateBucketName}.s3.${AWS::Region}.amazonaws.com/templates/eventbridge.yaml
+      Parameters:
+        EcrRepositoryName: !GetAtt EcrStack.Outputs.RepositoryName
+        PipelineName: !GetAtt CodePipelineStack.Outputs.PipelineName
+
+Outputs:
+  AlbDnsName:
+    Value: !GetAtt AlbStack.Outputs.AlbDnsName
