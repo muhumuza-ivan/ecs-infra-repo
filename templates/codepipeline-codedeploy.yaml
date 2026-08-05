@@ -95,6 +95,7 @@ Resources:
                   - !Sub arn:aws:s3:::${ArtifactBucketName}/*
               - Effect: Allow
                 Action:
+                  - codedeploy:GetApplication
                   - codedeploy:CreateDeployment
                   - codedeploy:GetDeployment
                   - codedeploy:GetDeploymentConfig
