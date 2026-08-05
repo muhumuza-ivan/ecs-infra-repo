@@ -3,15 +3,20 @@ Description: Root stack - wires all nested child stacks together
 
 Parameters:
   TemplateBucketName:
-    Type: String
-    Description: S3 bucket that holds the uploaded child template files
+    Type: AWS::SSM::Parameter::Value<String>
+    Default: /lab-app/artifact-bucket-name
   GitHubOrg:
-    Type: String
+    Type: AWS::SSM::Parameter::Value<String>
+    Default: /lab-app/github-org
   AppRepoName:
-    Type: String
+    Type: AWS::SSM::Parameter::Value<String>
+    Default: /lab-app/app-repo-name
+  GitHubConnectionArn:
+    Type: AWS::SSM::Parameter::Value<String>
+    Default: /lab-app/github-connection-arn
   GitHubOidcProviderArn:
-    Type: String
-    Description: ARN of the existing GitHub OIDC provider in this account
+    Type: AWS::SSM::Parameter::Value<String>
+    Default: /lab-app/github-oidc-provider-arn
 
 Resources:
   NetworkStack:
