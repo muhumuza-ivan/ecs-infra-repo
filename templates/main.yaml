@@ -14,9 +14,6 @@ Parameters:
   GitHubConnectionArn:
     Type: AWS::SSM::Parameter::Value<String>
     Default: /lab-app/github-connection-arn
-  GitHubOidcProviderArn:
-    Type: AWS::SSM::Parameter::Value<String>
-    Default: /lab-app/github-oidc-provider-arn
 
 Resources:
   NetworkStack:
@@ -30,16 +27,6 @@ Resources:
       TemplateURL: !Sub https://${TemplateBucketName}.s3.${AWS::Region}.amazonaws.com/templates/security-groups.yaml
       Parameters:
         VpcId: !GetAtt NetworkStack.Outputs.VpcId
-
-  OidcStack:
-    Type: AWS::CloudFormation::Stack
-    Properties:
-      TemplateURL: !Sub https://${TemplateBucketName}.s3.${AWS::Region}.amazonaws.com/templates/oidc-github.yaml
-      Parameters:
-        GitHubOrg: !Ref GitHubOrg
-        AppRepoName: !Ref AppRepoName
-        EcrRepositoryName: lab-app
-        GitHubOidcProviderArn: !Ref GitHubOidcProviderArn
 
   AlbStack:
     Type: AWS::CloudFormation::Stack
