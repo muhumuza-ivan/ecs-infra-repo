@@ -9,9 +9,9 @@ Parameters:
     Type: String
   AppRepoName:
     Type: String
-  GitHubConnectionArn:
+  GitHubOidcProviderArn:
     Type: String
-    Description: ARN of the CodeConnections connection authorized to your GitHub account
+    Description: ARN of the existing GitHub OIDC provider in this account
 
 Resources:
   NetworkStack:
@@ -44,6 +44,7 @@ Resources:
         GitHubOrg: !Ref GitHubOrg
         AppRepoName: !Ref AppRepoName
         EcrRepositoryName: !GetAtt EcrStack.Outputs.RepositoryName
+        GitHubOidcProviderArn: !Ref GitHubOidcProviderArn
 
   AlbStack:
     Type: AWS::CloudFormation::Stack

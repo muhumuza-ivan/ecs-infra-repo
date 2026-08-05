@@ -1,5 +1,5 @@
 AWSTemplateFormatVersion: "2010-09-09"
-Description: GitHub OIDC provider and the role GitHub Actions assumes to push to ECR
+Description: IAM role GitHub Actions assumes via the account's existing OIDC provider to push to ECR
 
 Parameters:
   GitHubOrg:
@@ -8,27 +8,21 @@ Parameters:
     Type: String
   EcrRepositoryName:
     Type: String
+  GitHubOidcProviderArn:
+    Type: String
+    Description: ARN of the existing GitHub OIDC provider in this account
 
 Resources:
-  GitHubOIDCProvider:
-    Type: AWS::IAM::OIDCProvider
-    Properties:
-      Url: https://token.actions.githubusercontent.com
-      ClientIdList:
-        - sts.amazonaws.com
-      ThumbprintList:
-        - 6938fd4d98bab03faadb97b34396831e3780aea1
-
   GitHubActionsRole:
     Type: AWS::IAM::Role
     Properties:
-      RoleName: github-actions-ecr-push-role
+      RoleName: lab-app-github-actions-role
       AssumeRolePolicyDocument:
         Version: "2012-10-17"
         Statement:
           - Effect: Allow
             Principal:
-              Federated: !Ref GitHubOIDCProvider
+              Federated: !Ref GitHubOidcProviderArn
             Action: sts:AssumeRoleWithWebIdentity
             Condition:
               StringEquals:
