@@ -31,16 +31,6 @@ Resources:
       Parameters:
         VpcId: !GetAtt NetworkStack.Outputs.VpcId
 
-  EcrStack:
-    Type: AWS::CloudFormation::Stack
-    Properties:
-      TemplateURL: !Sub https://${TemplateBucketName}.s3.${AWS::Region}.amazonaws.com/templates/ecr.yaml
-
-  ArtifactBucketStack:
-    Type: AWS::CloudFormation::Stack
-    Properties:
-      TemplateURL: !Sub https://${TemplateBucketName}.s3.${AWS::Region}.amazonaws.com/templates/artifact-bucket.yaml
-
   OidcStack:
     Type: AWS::CloudFormation::Stack
     Properties:
@@ -48,7 +38,7 @@ Resources:
       Parameters:
         GitHubOrg: !Ref GitHubOrg
         AppRepoName: !Ref AppRepoName
-        EcrRepositoryName: !GetAtt EcrStack.Outputs.RepositoryName
+        EcrRepositoryName: lab-app
         GitHubOidcProviderArn: !Ref GitHubOidcProviderArn
 
   AlbStack:
@@ -70,7 +60,7 @@ Resources:
         PrivateSubnet1Id: !GetAtt NetworkStack.Outputs.PrivateSubnet1Id
         PrivateSubnet2Id: !GetAtt NetworkStack.Outputs.PrivateSubnet2Id
         EcsTaskSecurityGroupId: !GetAtt SecurityGroupStack.Outputs.EcsTaskSecurityGroupId
-        EcrRepositoryUri: !GetAtt EcrStack.Outputs.RepositoryUri
+        EcrRepositoryUri: !Sub "${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/lab-app"
         TargetGroupBlueArn: !GetAtt AlbStack.Outputs.TargetGroupBlueArn
 
   CodePipelineStack:
@@ -83,8 +73,8 @@ Resources:
         ListenerArn: !GetAtt AlbStack.Outputs.ListenerArn
         TargetGroupBlueName: !GetAtt AlbStack.Outputs.TargetGroupBlueName
         TargetGroupGreenName: !GetAtt AlbStack.Outputs.TargetGroupGreenName
-        ArtifactBucketName: !GetAtt ArtifactBucketStack.Outputs.BucketName
-        EcrRepositoryName: !GetAtt EcrStack.Outputs.RepositoryName
+        ArtifactBucketName: !Ref TemplateBucketName
+        EcrRepositoryName: lab-app
         GitHubConnectionArn: !Ref GitHubConnectionArn
         AppRepoFullId: !Sub "${GitHubOrg}/${AppRepoName}"
 
@@ -93,7 +83,7 @@ Resources:
     Properties:
       TemplateURL: !Sub https://${TemplateBucketName}.s3.${AWS::Region}.amazonaws.com/templates/eventbridge.yaml
       Parameters:
-        EcrRepositoryName: !GetAtt EcrStack.Outputs.RepositoryName
+        EcrRepositoryName: lab-app
         PipelineName: !GetAtt CodePipelineStack.Outputs.PipelineName
 
 Outputs:
