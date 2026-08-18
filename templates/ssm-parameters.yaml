@@ -21,6 +21,7 @@ Resources:
 
   GitHubOrgParam:
     Type: AWS::SSM::Parameter
+    DependsOn: ArtifactBucketNameParam
     Properties:
       Name: /lab-app/github-org
       Type: String
@@ -28,6 +29,7 @@ Resources:
 
   AppRepoNameParam:
     Type: AWS::SSM::Parameter
+    DependsOn: GitHubOrgParam
     Properties:
       Name: /lab-app/app-repo-name
       Type: String
@@ -35,6 +37,7 @@ Resources:
 
   GitHubConnectionArnParam:
     Type: AWS::SSM::Parameter
+    DependsOn: AppRepoNameParam
     Properties:
       Name: /lab-app/github-connection-arn
       Type: String
