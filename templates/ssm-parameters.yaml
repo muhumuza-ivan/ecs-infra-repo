@@ -1,0 +1,41 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: SSM parameters holding account-identifying values, kept out of git history
+
+Parameters:
+  ArtifactBucketName:
+    Type: String
+  GitHubOrgName:
+    Type: String
+  AppRepoNameValue:
+    Type: String
+  GitHubConnectionArnValue:
+    Type: String
+
+Resources:
+  ArtifactBucketNameParam:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: /lab-app/artifact-bucket-name
+      Type: String
+      Value: !Ref ArtifactBucketName
+
+  GitHubOrgParam:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: /lab-app/github-org
+      Type: String
+      Value: !Ref GitHubOrgName
+
+  AppRepoNameParam:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: /lab-app/app-repo-name
+      Type: String
+      Value: !Ref AppRepoNameValue
+
+  GitHubConnectionArnParam:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: /lab-app/github-connection-arn
+      Type: String
+      Value: !Ref GitHubConnectionArnValue
