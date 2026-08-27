@@ -66,6 +66,16 @@ Resources:
           Image: !Sub "${EcrRepositoryUri}:latest"
           PortMappings:
             - ContainerPort: 8080
+          HealthCheck:
+            Command:
+              - CMD-SHELL
+              - wget -q -O /dev/null -T 3 http://127.0.0.1:8080/ || exit 1
+            Interval: 30
+            Timeout: 5
+            Retries: 3
+            # Spring Boot on 256 CPU units needs well over the 3 x 30s the
+            # retries allow, so suppress failures until it has had time to boot.
+            StartPeriod: 60
           LogConfiguration:
             LogDriver: awslogs
             Options:
@@ -82,6 +92,7 @@ Resources:
       TaskDefinition: !Ref TaskDefinition
       DeploymentController:
         Type: CODE_DEPLOY
+      HealthCheckGracePeriodSeconds: 120
       NetworkConfiguration:
         AwsvpcConfiguration:
           Subnets: [!Ref PrivateSubnet1Id, !Ref PrivateSubnet2Id]

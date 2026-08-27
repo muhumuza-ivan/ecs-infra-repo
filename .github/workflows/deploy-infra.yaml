@@ -1,16 +1,5 @@
 name: Deploy Infrastructure
 
-# Runs the same, fixed sequence on every push - no first-run detection logic
-# anywhere. Every step below is `aws cloudformation deploy`, which is
-# idempotent by design: it creates a stack if it doesn't exist, updates it if
-# the template changed, and safely no-ops (via --no-fail-on-empty-changeset)
-# if nothing changed. That built-in state comparison is the only "have we
-# bootstrapped yet" check this needs.
-#
-# Prerequisite (one-time, per AWS account): scripts/bootstrap-trust.sh has
-# been run locally, and AWS_ACCOUNT_ID / GITHUB_CONNECTION_ARN repo variables
-# are set. See scripts/bootstrap-trust.sh for details.
-
 on:
   push:
     branches: [main]
@@ -21,6 +10,8 @@ permissions:
 
 env:
   AWS_REGION: eu-west-1
+  APP_REPO_NAME: ecs-app-repo
+  ECR_REPOSITORY: lab-app
 
 jobs:
   deploy:
@@ -31,8 +22,14 @@ jobs:
       - name: Configure AWS credentials via OIDC
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: arn:aws:iam::${{ vars.AWS_ACCOUNT_ID }}:role/lab-app-infra-deploy-role
+          role-to-assume: ${{ secrets.AWS_INFRA_DEPLOY_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
+
+      - name: Resolve account-scoped names
+        run: |
+          ACCOUNT_ID="$(aws sts get-caller-identity --query Account --output text)"
+          echo "ARTIFACT_BUCKET=lab-app-artifacts-${ACCOUNT_ID}-${AWS_REGION}" >> "$GITHUB_ENV"
+          echo "OIDC_PROVIDER_ARN=arn:aws:iam::${ACCOUNT_ID}:oidc-provider/token.actions.githubusercontent.com" >> "$GITHUB_ENV"
 
       # Foundation layer - rarely changes after the first run, but safe to
       # run every time.
@@ -43,16 +40,27 @@ jobs:
             --template-file templates/artifact-bucket.yaml \
             --no-fail-on-empty-changeset
 
-      - name: Sync templates to S3
-        run: |
-          aws s3 sync templates/ s3://lab-app-artifacts-${{ vars.AWS_ACCOUNT_ID }}-${{ env.AWS_REGION }}/templates/ --delete
-
       - name: Deploy ECR repository
         run: |
           aws cloudformation deploy \
             --stack-name lab-app-ecr \
             --template-file templates/ecr.yaml \
             --no-fail-on-empty-changeset
+
+      # The role the app repo's workflow assumes: ECR push, plus writing
+      # app-config.zip (appspec.yaml + taskdef.json) into the artifact bucket.
+      - name: Deploy app repo GitHub Actions role
+        run: |
+          aws cloudformation deploy \
+            --stack-name lab-app-github-actions-role \
+            --template-file templates/oidc-github.yaml \
+            --capabilities CAPABILITY_NAMED_IAM \
+            --no-fail-on-empty-changeset \
+            --parameter-overrides \
+              GitHubOrg=${{ github.repository_owner }} \
+              AppRepoName="${APP_REPO_NAME}" \
+              EcrRepositoryName="${ECR_REPOSITORY}" \
+              GitHubOidcProviderArn="${OIDC_PROVIDER_ARN}"
 
       - name: Deploy SSM parameters
         run: |
@@ -61,10 +69,22 @@ jobs:
             --template-file templates/ssm-parameters.yaml \
             --no-fail-on-empty-changeset \
             --parameter-overrides \
-              ArtifactBucketName=lab-app-artifacts-${{ vars.AWS_ACCOUNT_ID }}-${{ env.AWS_REGION }} \
+              ArtifactBucketName="${ARTIFACT_BUCKET}" \
               GitHubOrgName=${{ github.repository_owner }} \
-              AppRepoNameValue=ecs-app-repo \
-              GitHubConnectionArnValue=${{ vars.CODECONNECTIONS_ARN }}
+              AppRepoNameValue="${APP_REPO_NAME}"
+
+      # Uploads every nested child template referenced by main.yaml to the
+      # artifact bucket and emits a copy of main.yaml with the local paths
+      # rewritten to those S3 URLs. Keys are content-hashed, so an unchanged
+      # child template re-resolves to the same object and the nested stack
+      # reports no changes.
+      - name: Package nested templates
+        run: |
+          aws cloudformation package \
+            --template-file main.yaml \
+            --s3-bucket "${ARTIFACT_BUCKET}" \
+            --s3-prefix templates \
+            --output-template-file packaged-main.yaml
 
       # Workload layer - this is the one that changes on essentially every
       # real commit once the account is bootstrapped: VPC, ALB, ECS, Auto
@@ -73,7 +93,7 @@ jobs:
         run: |
           aws cloudformation deploy \
             --stack-name lab-app-stack \
-            --template-file templates/main.yaml \
+            --template-file packaged-main.yaml \
             --capabilities CAPABILITY_NAMED_IAM \
             --no-fail-on-empty-changeset
 

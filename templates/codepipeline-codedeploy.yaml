@@ -14,17 +14,14 @@ Parameters:
     Type: String
   ArtifactBucketName:
     Type: String
+  AppConfigObjectKey:
+    Type: String
+    Default: app-config/app-config.zip
+    Description: >-
+      Versioned S3 object (zip) holding appspec.yaml + taskdef.json, uploaded by
+      the app repo's GitHub Actions workflow before it pushes the image.
   EcrRepositoryName:
     Type: String
-  GitHubConnectionArn:
-    Type: String
-    Description: ARN of the CodeConnections connection authorized to your GitHub account (same one used for GitSync)
-  AppRepoFullId:
-    Type: String
-    Description: "e.g. muhumuza-ivan/ecs-app-repo"
-  AppRepoBranch:
-    Type: String
-    Default: main
 
 Resources:
   CodeDeployServiceRole:
@@ -62,6 +59,9 @@ Resources:
           ActionOnTimeout: CONTINUE_DEPLOYMENT
       LoadBalancerInfo:
         TargetGroupPairInfoList:
+          # Order matters: the first target group must be the one the listener
+          # and the ECS service currently point at (blue). CodeDeploy shifts
+          # prod traffic from the first to the second on each deployment.
           - ProdTrafficRoute:
               ListenerArns: [!Ref ListenerArn]
             TargetGroups:
@@ -85,10 +85,14 @@ Resources:
           PolicyDocument:
             Version: "2012-10-17"
             Statement:
+              # GetObjectVersion is required by the S3 source action - it reads a
+              # specific object version, not just the current one.
               - Effect: Allow
                 Action:
                   - s3:GetObject
+                  - s3:GetObjectVersion
                   - s3:PutObject
+                  - s3:ListBucket
                   - s3:GetBucketVersioning
                 Resource:
                   - !Sub arn:aws:s3:::${ArtifactBucketName}
@@ -108,10 +112,6 @@ Resources:
                   - ecr:GetDownloadUrlForLayer
                   - ecr:BatchGetImage
                 Resource: "*"
-              - Effect: Allow
-                Action:
-                  - codeconnections:UseConnection
-                Resource: !Ref GitHubConnectionArn
               - Effect: Allow
                 Action:
                   - ecs:RegisterTaskDefinition
@@ -135,18 +135,17 @@ Resources:
       Stages:
         - Name: Source
           Actions:
-            # Source #1: app-repo on GitHub - supplies taskdef.json and appspec.yaml
+            # Source #1: the app-config zip in the artifact bucket - supplies taskdef.json and appspec.yaml.
             - Name: AppSource
               ActionTypeId:
                 Category: Source
                 Owner: AWS
-                Provider: CodeStarSourceConnection
+                Provider: S3
                 Version: "1"
               Configuration:
-                ConnectionArn: !Ref GitHubConnectionArn
-                FullRepositoryId: !Ref AppRepoFullId
-                BranchName: !Ref AppRepoBranch
-                OutputArtifactFormat: CODE_ZIP
+                S3Bucket: !Ref ArtifactBucketName
+                S3ObjectKey: !Ref AppConfigObjectKey
+                PollForSourceChanges: false
               OutputArtifacts:
                 - Name: AppSource
             # Source #2: ECR - supplies imageDetail.json (the pushed image's URI)

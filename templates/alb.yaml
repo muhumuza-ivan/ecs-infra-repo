@@ -27,9 +27,14 @@ Resources:
       Protocol: HTTP
       TargetType: ip
       VpcId: !Ref VpcId
+      HealthCheckProtocol: HTTP
       HealthCheckPath: /
       HealthCheckIntervalSeconds: 15
+      HealthCheckTimeoutSeconds: 5
       HealthyThresholdCount: 2
+      UnhealthyThresholdCount: 3
+      Matcher:
+        HttpCode: "200"
 
   TargetGroupGreen:
     Type: AWS::ElasticLoadBalancingV2::TargetGroup
@@ -39,9 +44,14 @@ Resources:
       Protocol: HTTP
       TargetType: ip
       VpcId: !Ref VpcId
+      HealthCheckProtocol: HTTP
       HealthCheckPath: /
       HealthCheckIntervalSeconds: 15
+      HealthCheckTimeoutSeconds: 5
       HealthyThresholdCount: 2
+      UnhealthyThresholdCount: 3
+      Matcher:
+        HttpCode: "200"
 
   Listener:
     Type: AWS::ElasticLoadBalancingV2::Listener

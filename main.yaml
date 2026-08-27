@@ -1,37 +1,42 @@
 AWSTemplateFormatVersion: "2010-09-09"
 Description: Root stack - wires all nested child stacks together
 
+# This root stack sits one level above its children in templates/, so the
+# relative TemplateURLs below read the way the nesting actually works.
+#
+# Those URLs are LOCAL RELATIVE PATHS, not S3 URLs. They are resolved and
+# rewritten by `aws cloudformation package`, which uploads each child template
+# to the artifact bucket and substitutes the real S3 URL before the deploy.
+
 Parameters:
-  TemplateBucketName:
+  ArtifactBucketName:
     Type: AWS::SSM::Parameter::Value<String>
     Default: /lab-app/artifact-bucket-name
-  GitHubOrg:
-    Type: AWS::SSM::Parameter::Value<String>
-    Default: /lab-app/github-org
-  AppRepoName:
-    Type: AWS::SSM::Parameter::Value<String>
-    Default: /lab-app/app-repo-name
-  GitHubConnectionArn:
-    Type: AWS::SSM::Parameter::Value<String>
-    Default: /lab-app/github-connection-arn
+    Description: Bucket used for CodePipeline artifacts and the app-config source object
+  AppConfigObjectKey:
+    Type: String
+    Default: app-config/app-config.zip
+    Description: >-
+      Key of the zip the app repo's workflow uploads, containing appspec.yaml
+      and taskdef.json. This is the pipeline's AppSource.
 
 Resources:
   NetworkStack:
     Type: AWS::CloudFormation::Stack
     Properties:
-      TemplateURL: !Sub https://${TemplateBucketName}.s3.${AWS::Region}.amazonaws.com/templates/network.yaml
+      TemplateURL: templates/network.yaml
 
   SecurityGroupStack:
     Type: AWS::CloudFormation::Stack
     Properties:
-      TemplateURL: !Sub https://${TemplateBucketName}.s3.${AWS::Region}.amazonaws.com/templates/security-groups.yaml
+      TemplateURL: templates/security-groups.yaml
       Parameters:
         VpcId: !GetAtt NetworkStack.Outputs.VpcId
 
   AlbStack:
     Type: AWS::CloudFormation::Stack
     Properties:
-      TemplateURL: !Sub https://${TemplateBucketName}.s3.${AWS::Region}.amazonaws.com/templates/alb.yaml
+      TemplateURL: templates/alb.yaml
       Parameters:
         VpcId: !GetAtt NetworkStack.Outputs.VpcId
         PublicSubnet1Id: !GetAtt NetworkStack.Outputs.PublicSubnet1Id
@@ -41,34 +46,35 @@ Resources:
   EcsStack:
     Type: AWS::CloudFormation::Stack
     Properties:
-      TemplateURL: !Sub https://${TemplateBucketName}.s3.${AWS::Region}.amazonaws.com/templates/ecs-cluster-service.yaml
+      TemplateURL: templates/ecs-cluster-service.yaml
       Parameters:
         VpcId: !GetAtt NetworkStack.Outputs.VpcId
         PrivateSubnet1Id: !GetAtt NetworkStack.Outputs.PrivateSubnet1Id
         PrivateSubnet2Id: !GetAtt NetworkStack.Outputs.PrivateSubnet2Id
         EcsTaskSecurityGroupId: !GetAtt SecurityGroupStack.Outputs.EcsTaskSecurityGroupId
         EcrRepositoryUri: !Sub "${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/lab-app"
+        # The service starts registered against BLUE. CodeDeploy owns the
+        # blue <-> green swap from here on.
         TargetGroupBlueArn: !GetAtt AlbStack.Outputs.TargetGroupBlueArn
 
   CodePipelineStack:
     Type: AWS::CloudFormation::Stack
     Properties:
-      TemplateURL: !Sub https://${TemplateBucketName}.s3.${AWS::Region}.amazonaws.com/templates/codepipeline-codedeploy.yaml
+      TemplateURL: templates/codepipeline-codedeploy.yaml
       Parameters:
         ClusterName: !GetAtt EcsStack.Outputs.ClusterName
         ServiceName: !GetAtt EcsStack.Outputs.ServiceName
         ListenerArn: !GetAtt AlbStack.Outputs.ListenerArn
         TargetGroupBlueName: !GetAtt AlbStack.Outputs.TargetGroupBlueName
         TargetGroupGreenName: !GetAtt AlbStack.Outputs.TargetGroupGreenName
-        ArtifactBucketName: !Ref TemplateBucketName
+        ArtifactBucketName: !Ref ArtifactBucketName
+        AppConfigObjectKey: !Ref AppConfigObjectKey
         EcrRepositoryName: lab-app
-        GitHubConnectionArn: !Ref GitHubConnectionArn
-        AppRepoFullId: !Sub "${GitHubOrg}/${AppRepoName}"
 
   EventBridgeStack:
     Type: AWS::CloudFormation::Stack
     Properties:
-      TemplateURL: !Sub https://${TemplateBucketName}.s3.${AWS::Region}.amazonaws.com/templates/eventbridge.yaml
+      TemplateURL: templates/eventbridge.yaml
       Parameters:
         EcrRepositoryName: lab-app
         PipelineName: !GetAtt CodePipelineStack.Outputs.PipelineName

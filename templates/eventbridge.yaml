@@ -36,6 +36,7 @@ Resources:
         detail:
           action-type: ["PUSH"]
           repository-name: [!Ref EcrRepositoryName]
+          image-tag: ["latest"]
           result: ["SUCCESS"]
       Targets:
         - Arn: !Sub arn:aws:codepipeline:${AWS::Region}:${AWS::AccountId}:${PipelineName}

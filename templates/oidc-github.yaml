@@ -47,6 +47,18 @@ Resources:
                   - ecr:UploadLayerPart
                   - ecr:CompleteLayerUpload
                 Resource: !Sub arn:aws:ecr:${AWS::Region}:${AWS::AccountId}:repository/${EcrRepositoryName}
+        # The app repo's workflow also uploads app-config.zip (appspec.yaml +
+        # taskdef.json) to the artifact bucket, which is the pipeline's
+        # AppSource. Scoped to that one key prefix - not the whole bucket, which
+        # also holds nested templates and CodePipeline's own artifact store.
+        - PolicyName: app-config-upload
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:PutObject
+                Resource: !Sub arn:aws:s3:::lab-app-artifacts-${AWS::AccountId}-${AWS::Region}/app-config/*
 
 Outputs:
   GitHubActionsRoleArn:

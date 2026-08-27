@@ -8,8 +8,6 @@ Parameters:
     Type: String
   AppRepoNameValue:
     Type: String
-  GitHubConnectionArnValue:
-    Type: String
 
 Resources:
   ArtifactBucketNameParam:
@@ -34,11 +32,3 @@ Resources:
       Name: /lab-app/app-repo-name
       Type: String
       Value: !Ref AppRepoNameValue
-
-  GitHubConnectionArnParam:
-    Type: AWS::SSM::Parameter
-    DependsOn: AppRepoNameParam
-    Properties:
-      Name: /lab-app/github-connection-arn
-      Type: String
-      Value: !Ref GitHubConnectionArnValue
