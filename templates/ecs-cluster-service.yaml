@@ -51,6 +51,19 @@ Resources:
             Action: sts:AssumeRole
       RoleName: lab-app-task-role
 
+  # BOOTSTRAP ONLY - do not add or change container properties here.
+  #
+  # This revision exists so the service can be created before any deployment
+  # has run. From the first CodeDeploy deployment onward the service runs a
+  # revision registered from the app repo's taskdef.json, and that file is the
+  # only place container settings (image, ports, health check, logging) should
+  # be edited.
+  #
+  # Editing this resource registers a new revision, which makes CloudFormation
+  # try to repoint EcsService at it - and ECS rejects that outright for a
+  # service with a CODE_DEPLOY deployment controller ("Unable to update task
+  # definition on services with a CODE_DEPLOY deployment controller"), failing
+  # the whole nested stack.
   TaskDefinition:
     Type: AWS::ECS::TaskDefinition
     Properties:
@@ -66,16 +79,10 @@ Resources:
           Image: !Sub "${EcrRepositoryUri}:latest"
           PortMappings:
             - ContainerPort: 8080
-          HealthCheck:
-            Command:
-              - CMD-SHELL
-              - wget -q -O /dev/null -T 3 http://127.0.0.1:8080/ || exit 1
-            Interval: 30
-            Timeout: 5
-            Retries: 3
-            # Spring Boot on 256 CPU units needs well over the 3 x 30s the
-            # retries allow, so suppress failures until it has had time to boot.
-            StartPeriod: 60
+          # No HealthCheck here on purpose - see the note above. The container
+          # health check that fixes the UNKNOWN health status lives in the app
+          # repo's taskdef.json, which is the definition CodeDeploy actually
+          # registers and runs.
           LogConfiguration:
             LogDriver: awslogs
             Options:
