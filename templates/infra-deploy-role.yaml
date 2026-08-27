@@ -157,15 +157,23 @@ Resources:
                   - elasticloadbalancing:CreateLoadBalancer
                   - elasticloadbalancing:DeleteLoadBalancer
                   - elasticloadbalancing:DescribeLoadBalancers
+                  - elasticloadbalancing:ModifyLoadBalancerAttributes
+                  - elasticloadbalancing:DescribeLoadBalancerAttributes
+                  - elasticloadbalancing:SetSecurityGroups
+                  - elasticloadbalancing:SetSubnets
                   - elasticloadbalancing:CreateTargetGroup
                   - elasticloadbalancing:DeleteTargetGroup
                   - elasticloadbalancing:DescribeTargetGroups
+                  - elasticloadbalancing:ModifyTargetGroup
+                  - elasticloadbalancing:ModifyTargetGroupAttributes
+                  - elasticloadbalancing:DescribeTargetGroupAttributes
                   - elasticloadbalancing:DescribeTargetHealth
                   - elasticloadbalancing:CreateListener
                   - elasticloadbalancing:DeleteListener
                   - elasticloadbalancing:DescribeListeners
                   - elasticloadbalancing:ModifyListener
                   - elasticloadbalancing:AddTags
+                  - elasticloadbalancing:RemoveTags
                   - elasticloadbalancing:DescribeTags
                 Resource: "*"
 
