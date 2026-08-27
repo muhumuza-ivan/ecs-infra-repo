@@ -232,8 +232,10 @@ Resources:
                   - codepipeline:GetPipeline
                   - codepipeline:GetPipelineState
                   - codepipeline:TagResource
+                  - codepipeline:ListTagsForResource
                 Resource:
                   - !Sub "arn:aws:codepipeline:${AWS::Region}:${AWS::AccountId}:lab-app-pipeline"
+                  - !Sub "arn:aws:codepipeline:${AWS::Region}:${AWS::AccountId}:lab-app-pipeline/*"
               - Effect: Allow
                 Action:
                   - codedeploy:CreateApplication
