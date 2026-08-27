@@ -49,10 +49,14 @@ jobs:
 
       # The role the app repo's workflow assumes: ECR push, plus writing
       # app-config.zip (appspec.yaml + taskdef.json) into the artifact bucket.
+      # Stack name is lab-app-oidc because that is the stack that already owns
+      # lab-app-github-actions-role in this account. Deploying the same template
+      # under a new stack name would fail - CloudFormation refuses to create a
+      # named IAM role that another stack already manages.
       - name: Deploy app repo GitHub Actions role
         run: |
           aws cloudformation deploy \
-            --stack-name lab-app-github-actions-role \
+            --stack-name lab-app-oidc \
             --template-file templates/oidc-github.yaml \
             --capabilities CAPABILITY_NAMED_IAM \
             --no-fail-on-empty-changeset \
