@@ -7,12 +7,34 @@ Description: Root stack - wires all nested child stacks together
 # Those URLs are LOCAL RELATIVE PATHS, not S3 URLs. They are resolved and
 # rewritten by `aws cloudformation package`, which uploads each child template
 # to the artifact bucket and substitutes the real S3 URL before the deploy.
+#
+# Everything the account needs is declared here EXCEPT the artifact bucket.
+# That one cannot be nested: `package` uploads these child templates *into* it,
+# so it has to exist before packaging runs. It stays a bootstrap step in
+# .github/workflows/deploy-infra.yaml.
+#
+# Note ArtifactBucketName is a plain String, deliberately. It used to be an
+# AWS::SSM::Parameter::Value<String> reading /lab-app/artifact-bucket-name, but
+# CloudFormation resolves SSM-typed parameters before it creates any resource,
+# which made it impossible to nest the stack that writes them. The workflow
+# already derives the bucket name, so it passes it in directly instead.
 
 Parameters:
   ArtifactBucketName:
-    Type: AWS::SSM::Parameter::Value<String>
-    Default: /lab-app/artifact-bucket-name
+    Type: String
     Description: Bucket used for CodePipeline artifacts and the app-config source object
+  GitHubOrg:
+    Type: String
+    Description: GitHub org/user that owns both repos
+  AppRepoName:
+    Type: String
+    Default: ecs-app-repo
+  GitHubOidcProviderArn:
+    Type: String
+    Description: ARN of the existing GitHub OIDC provider in this account
+  EcrRepositoryName:
+    Type: String
+    Default: lab-app
   AppConfigObjectKey:
     Type: String
     Default: app-config/app-config.zip
@@ -21,6 +43,32 @@ Parameters:
       and taskdef.json. This is the pipeline's AppSource.
 
 Resources:
+  EcrStack:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: templates/ecr.yaml
+
+  # The role the app repo's GitHub Actions workflow assumes: ECR push, plus
+  # writing app-config.zip into the artifact bucket.
+  OidcStack:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: templates/oidc-github.yaml
+      Parameters:
+        GitHubOrg: !Ref GitHubOrg
+        AppRepoName: !Ref AppRepoName
+        EcrRepositoryName: !Ref EcrRepositoryName
+        GitHubOidcProviderArn: !Ref GitHubOidcProviderArn
+
+  SsmParameterStack:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: templates/ssm-parameters.yaml
+      Parameters:
+        ArtifactBucketName: !Ref ArtifactBucketName
+        GitHubOrgName: !Ref GitHubOrg
+        AppRepoNameValue: !Ref AppRepoName
+
   NetworkStack:
     Type: AWS::CloudFormation::Stack
     Properties:
@@ -43,8 +91,12 @@ Resources:
         PublicSubnet2Id: !GetAtt NetworkStack.Outputs.PublicSubnet2Id
         AlbSecurityGroupId: !GetAtt SecurityGroupStack.Outputs.AlbSecurityGroupId
 
+  # DependsOn EcrStack so the repository exists before the task definition that
+  # names its image URI - the URI is only a string here, but ordering the two
+  # keeps a first-run deploy honest.
   EcsStack:
     Type: AWS::CloudFormation::Stack
+    DependsOn: EcrStack
     Properties:
       TemplateURL: templates/ecs-cluster-service.yaml
       Parameters:
@@ -52,13 +104,14 @@ Resources:
         PrivateSubnet1Id: !GetAtt NetworkStack.Outputs.PrivateSubnet1Id
         PrivateSubnet2Id: !GetAtt NetworkStack.Outputs.PrivateSubnet2Id
         EcsTaskSecurityGroupId: !GetAtt SecurityGroupStack.Outputs.EcsTaskSecurityGroupId
-        EcrRepositoryUri: !Sub "${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/lab-app"
+        EcrRepositoryUri: !Sub "${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${EcrRepositoryName}"
         # The service starts registered against BLUE. CodeDeploy owns the
         # blue <-> green swap from here on.
         TargetGroupBlueArn: !GetAtt AlbStack.Outputs.TargetGroupBlueArn
 
   CodePipelineStack:
     Type: AWS::CloudFormation::Stack
+    DependsOn: EcrStack
     Properties:
       TemplateURL: templates/codepipeline-codedeploy.yaml
       Parameters:
@@ -69,16 +122,19 @@ Resources:
         TargetGroupGreenName: !GetAtt AlbStack.Outputs.TargetGroupGreenName
         ArtifactBucketName: !Ref ArtifactBucketName
         AppConfigObjectKey: !Ref AppConfigObjectKey
-        EcrRepositoryName: lab-app
+        EcrRepositoryName: !Ref EcrRepositoryName
 
   EventBridgeStack:
     Type: AWS::CloudFormation::Stack
     Properties:
       TemplateURL: templates/eventbridge.yaml
       Parameters:
-        EcrRepositoryName: lab-app
+        EcrRepositoryName: !Ref EcrRepositoryName
         PipelineName: !GetAtt CodePipelineStack.Outputs.PipelineName
 
 Outputs:
   AlbDnsName:
     Value: !GetAtt AlbStack.Outputs.AlbDnsName
+  GitHubActionsRoleArn:
+    Description: Set this as the AWS_GITHUB_ACTIONS_ROLE_ARN secret in the app repo
+    Value: !GetAtt OidcStack.Outputs.GitHubActionsRoleArn

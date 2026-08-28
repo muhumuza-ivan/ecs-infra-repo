@@ -20,62 +20,24 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Configure AWS credentials via OIDC
+        id: aws
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ secrets.AWS_INFRA_DEPLOY_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: Resolve account-scoped names
-        run: |
-          ACCOUNT_ID="$(aws sts get-caller-identity --query Account --output text)"
-          echo "ARTIFACT_BUCKET=lab-app-artifacts-${ACCOUNT_ID}-${AWS_REGION}" >> "$GITHUB_ENV"
-          echo "OIDC_PROVIDER_ARN=arn:aws:iam::${ACCOUNT_ID}:oidc-provider/token.actions.githubusercontent.com" >> "$GITHUB_ENV"
-
-      # Foundation layer - rarely changes after the first run, but safe to
-      # run every time.
+      # The ONLY stack deployed outside main.yaml. It cannot be nested: the
+      # packaging step below uploads main.yaml's child templates *into* this
+      # bucket, so it has to exist before packaging runs. Everything else -
+      # ECR, the app repo's OIDC role, the SSM parameters, and the whole
+      # VPC/ALB/ECS/pipeline tree - is declared in main.yaml and created by the
+      # single deploy step at the end.
       - name: Deploy artifact bucket
         run: |
           aws cloudformation deploy \
             --stack-name lab-app-artifact-bucket \
             --template-file templates/artifact-bucket.yaml \
             --no-fail-on-empty-changeset
-
-      - name: Deploy ECR repository
-        run: |
-          aws cloudformation deploy \
-            --stack-name lab-app-ecr \
-            --template-file templates/ecr.yaml \
-            --no-fail-on-empty-changeset
-
-      # The role the app repo's workflow assumes: ECR push, plus writing
-      # app-config.zip (appspec.yaml + taskdef.json) into the artifact bucket.
-      # Stack name is lab-app-oidc because that is the stack that already owns
-      # lab-app-github-actions-role in this account. Deploying the same template
-      # under a new stack name would fail - CloudFormation refuses to create a
-      # named IAM role that another stack already manages.
-      - name: Deploy app repo GitHub Actions role
-        run: |
-          aws cloudformation deploy \
-            --stack-name lab-app-oidc \
-            --template-file templates/oidc-github.yaml \
-            --capabilities CAPABILITY_NAMED_IAM \
-            --no-fail-on-empty-changeset \
-            --parameter-overrides \
-              GitHubOrg=${{ github.repository_owner }} \
-              AppRepoName="${APP_REPO_NAME}" \
-              EcrRepositoryName="${ECR_REPOSITORY}" \
-              GitHubOidcProviderArn="${OIDC_PROVIDER_ARN}"
-
-      - name: Deploy SSM parameters
-        run: |
-          aws cloudformation deploy \
-            --stack-name lab-app-ssm-parameters \
-            --template-file templates/ssm-parameters.yaml \
-            --no-fail-on-empty-changeset \
-            --parameter-overrides \
-              ArtifactBucketName="${ARTIFACT_BUCKET}" \
-              GitHubOrgName=${{ github.repository_owner }} \
-              AppRepoNameValue="${APP_REPO_NAME}"
 
       # Uploads every nested child template referenced by main.yaml to the
       # artifact bucket and emits a copy of main.yaml with the local paths
@@ -86,20 +48,26 @@ jobs:
         run: |
           aws cloudformation package \
             --template-file main.yaml \
-            --s3-bucket "${ARTIFACT_BUCKET}" \
+            --s3-bucket "lab-app-artifacts-${{ steps.aws.outputs.aws-account-id }}-${{ env.AWS_REGION }}" \
             --s3-prefix templates \
             --output-template-file packaged-main.yaml
 
-      # Workload layer - this is the one that changes on essentially every
-      # real commit once the account is bootstrapped: VPC, ALB, ECS, Auto
-      # Scaling, CodePipeline, CodeDeploy, EventBridge.
+      # Deploys the whole tree from the packaged template: ECR, the app repo's
+      # OIDC role, SSM parameters, VPC, ALB, ECS, Auto Scaling, CodePipeline,
+      # CodeDeploy and the EventBridge rule.
       - name: Deploy main stack
         run: |
           aws cloudformation deploy \
             --stack-name lab-app-stack \
             --template-file packaged-main.yaml \
             --capabilities CAPABILITY_NAMED_IAM \
-            --no-fail-on-empty-changeset
+            --no-fail-on-empty-changeset \
+            --parameter-overrides \
+              ArtifactBucketName="lab-app-artifacts-${{ steps.aws.outputs.aws-account-id }}-${{ env.AWS_REGION }}" \
+              GitHubOrg=${{ github.repository_owner }} \
+              AppRepoName="${APP_REPO_NAME}" \
+              EcrRepositoryName="${ECR_REPOSITORY}" \
+              GitHubOidcProviderArn="arn:aws:iam::${{ steps.aws.outputs.aws-account-id }}:oidc-provider/token.actions.githubusercontent.com"
 
       - name: Print ALB endpoint
         run: |
